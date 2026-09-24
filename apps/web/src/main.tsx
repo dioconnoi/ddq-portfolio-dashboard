@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App'
@@ -7,10 +8,16 @@ import { ThemeProvider } from './theme/ThemeProvider'
 const root = document.getElementById('root')
 if (root === null) throw new Error('Missing #root element')
 
+const queryClient = new QueryClient({
+  defaultOptions: { queries: { retry: 2, retryDelay: 1500 } },
+})
+
 createRoot(root).render(
   <StrictMode>
-    <ThemeProvider>
-      <App />
-    </ThemeProvider>
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider>
+        <App />
+      </ThemeProvider>
+    </QueryClientProvider>
   </StrictMode>,
 )
