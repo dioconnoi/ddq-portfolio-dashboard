@@ -1,0 +1,13 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ddq-analytics"
+version = "0.1.0"
+description = "DDQ portfolio risk analytics core: pure Python, no I/O."
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ddq_analytics"]

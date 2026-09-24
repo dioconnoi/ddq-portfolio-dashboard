@@ -1,0 +1,65 @@
+[project]
+name = "ddq-portfolio-dashboard"
+version = "0.0.0"
+description = "DDQ (Data Driven Quant) Portfolio Dashboard: workspace root"
+requires-python = ">=3.12"
+dependencies = ["ddq-analytics", "ddq-api"]
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["packages/analytics", "apps/api"]
+
+[tool.uv.sources]
+ddq-analytics = { workspace = true }
+ddq-api = { workspace = true }
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3",
+  "pytest-asyncio>=0.24",
+  "pytest-cov>=5.0",
+  "ruff>=0.8",
+  "mypy>=1.13",
+  "import-linter>=2.1",
+  "pip-audit>=2.7",
+  "pre-commit>=4.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["packages/analytics/src", "apps/api/src"]
+extend-exclude = ["apps/web", "docs"]  # ruff 0.16 also formats code blocks in Markdown
+
+[tool.ruff.lint]
+# T20 forbids print(); S is bandit; ASYNC catches blocking calls in async code.
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "C4", "RUF", "S", "T20", "ASYNC", "PT"]
+
+[tool.ruff.lint.per-file-ignores]
+"**/tests/**" = ["S101", "S105", "S106"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+explicit_package_bases = true
+mypy_path = "packages/analytics/src:apps/api/src"
+exclude = ["apps/api/migrations"]
+
+[tool.pytest.ini_options]
+testpaths = ["packages/analytics/tests", "apps/api/tests"]
+asyncio_mode = "auto"
+addopts = "--import-mode=importlib --cov=ddq_analytics --cov=ddq_api --cov-report=term-missing --cov-fail-under=80"
+markers = ["integration: needs a real Postgres (set DDQ_TEST_DATABASE_URL to a THROWAWAY database)"]
+
+[tool.importlinter]
+root_packages = ["ddq_analytics", "ddq_api", "fastapi", "sqlalchemy", "asyncpg", "httpx"]
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "analytics core stays pure (no web, DB or network imports)"
+type = "forbidden"
+source_modules = ["ddq_analytics"]
+forbidden_modules = ["ddq_api", "fastapi", "sqlalchemy", "asyncpg", "httpx"]
