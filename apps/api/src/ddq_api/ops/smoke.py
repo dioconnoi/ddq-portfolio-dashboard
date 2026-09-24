@@ -37,15 +37,34 @@ def _missing(response: httpx.Response, required: tuple[str, ...]) -> list[str]:
     return [header for header in required if header not in response.headers]
 
 
+def _fetch_all(api: str, web: str, client: httpx.Client) -> tuple[httpx.Response, ...]:
+    timeout = _REQUEST_TIMEOUT_S
+    return (
+        client.get(f"{api}/health", timeout=timeout),
+        client.get(f"{api}/ready", timeout=timeout),
+        client.get(f"{api}/health", headers={"Origin": web}, timeout=timeout),
+        client.get(f"{api}/health", headers={"Origin": _EVIL_ORIGIN}, timeout=timeout),
+        client.get(web, timeout=timeout),
+    )
+
+
 def run_smoke(api_url: str, web_url: str, client: httpx.Client) -> list[CheckResult]:
     api, web = api_url.rstrip("/"), web_url.rstrip("/")
-    timeout = _REQUEST_TIMEOUT_S
-    health = client.get(f"{api}/health", timeout=timeout)
-    ready = client.get(f"{api}/ready", timeout=timeout)
-    cors_ok = client.get(f"{api}/health", headers={"Origin": web}, timeout=timeout)
-    cors_bad = client.get(f"{api}/health", headers={"Origin": _EVIL_ORIGIN}, timeout=timeout)
-    shell = client.get(web, timeout=timeout)
+    try:
+        responses = _fetch_all(api, web, client)
+    except httpx.HTTPError as error:
+        return [CheckResult("reachability", False, type(error).__name__)]
+    return _evaluate(web, *responses)
 
+
+def _evaluate(
+    web: str,
+    health: httpx.Response,
+    ready: httpx.Response,
+    cors_ok: httpx.Response,
+    cors_bad: httpx.Response,
+    shell: httpx.Response,
+) -> list[CheckResult]:
     health_data = _json(health).get("data") or {}
     ready_data = _json(ready).get("data") or {}
     db_ok = ((ready_data.get("checks") or {}).get("database") or {}).get("ok") is True

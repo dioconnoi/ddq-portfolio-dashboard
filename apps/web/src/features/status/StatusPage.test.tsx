@@ -78,4 +78,49 @@ describe('StatusPage', () => {
     await userEvent.click(screen.getByRole('button', { name: /retry/i }))
     expect(await screen.findByText('Online')).toBeInTheDocument()
   })
+
+  it('gives up with Offline and a Retry button when the API never answers, without retrying', async () => {
+    vi.useFakeTimers()
+    let calls = 0
+    const silent = fakeFetch({ '/health': null, '/ready': null })
+    const client = createApiClient('http://api.test', (req) => {
+      calls += 1
+      return silent(req)
+    })
+    renderWithProviders(<StatusPage client={client} />)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(90_001)
+    })
+    expect(screen.getByText('Offline')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument()
+    expect(calls).toBe(2) // /health and /ready once each: a timeout is not retried
+  })
+
+  it('retries transient failures a couple of times before giving up', async () => {
+    let calls = 0
+    const html = { status: 502, body: 'bad gateway', contentType: 'text/plain' }
+    const failing = fakeFetch({ '/health': html, '/ready': html })
+    const client = createApiClient('http://api.test', (req) => {
+      calls += 1
+      return failing(req)
+    })
+    renderWithProviders(<StatusPage client={client} />)
+    await screen.findByText('Offline')
+    expect(calls).toBeGreaterThanOrEqual(6) // 3 attempts x (/health + /ready)
+  })
+
+  it('hides the last-known facts once a refetch has failed', async () => {
+    const routes: Parameters<typeof fakeFetch>[0] = { '/health': HEALTH, '/ready': READY_DOWN }
+    const client = createApiClient('http://api.test', (req) => fakeFetch(routes)(req))
+    renderWithProviders(<StatusPage client={client} />)
+    expect(await screen.findByText('Degraded')).toBeInTheDocument()
+    expect(screen.getByText('0.1.0')).toBeInTheDocument()
+
+    const down = { status: 502, body: 'bad', contentType: 'text/plain' }
+    routes['/health'] = down
+    routes['/ready'] = down
+    await userEvent.click(screen.getByRole('button', { name: /retry/i }))
+    expect(await screen.findByText('Offline')).toBeInTheDocument()
+    expect(screen.queryByText('0.1.0')).not.toBeInTheDocument()
+  })
 })

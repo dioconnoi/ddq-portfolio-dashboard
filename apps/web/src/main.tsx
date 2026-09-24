@@ -8,8 +8,9 @@ import { ThemeProvider } from './theme/ThemeProvider'
 const root = document.getElementById('root')
 if (root === null) throw new Error('Missing #root element')
 
+// The status hook owns the retry count; the delay between attempts lives here.
 const queryClient = new QueryClient({
-  defaultOptions: { queries: { retry: 2, retryDelay: 1500 } },
+  defaultOptions: { queries: { retryDelay: 1500 } },
 })
 
 createRoot(root).render(

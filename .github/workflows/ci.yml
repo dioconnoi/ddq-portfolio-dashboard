@@ -10,7 +10,8 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # never cancel a running migration on main; superseded PR runs are cancelled
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   backend:
@@ -27,9 +28,10 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 10
     env:
       DDQ_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ddq_test
+      DDQ_REQUIRE_INTEGRATION: "1"
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
         with:
           enable-cache: true
       - run: uv sync --frozen
@@ -47,11 +49,11 @@ jobs:
     env:
       VITE_API_URL: https://api.example.invalid
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           package_json_file: apps/web/package.json
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: pnpm
@@ -65,12 +67,12 @@ jobs:
   contract:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           package_json_file: apps/web/package.json
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: pnpm
@@ -85,16 +87,16 @@ jobs:
   security:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@v2
+      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
       - run: uv sync --frozen
       - run: uv run pip-audit --skip-editable
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           package_json_file: apps/web/package.json
       - run: pnpm --dir apps/web audit --prod --audit-level high
@@ -104,12 +106,17 @@ jobs:
     needs: [backend, web, contract, security]
     runs-on: ubuntu-latest
     environment: production
-    env:
-      DDQ_DATABASE_MIGRATION_URL: ${{ secrets.DDQ_DATABASE_MIGRATION_URL }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
       - run: uv sync --frozen
       - name: Apply migrations (skipped until the secret exists)
-        if: env.DDQ_DATABASE_MIGRATION_URL != ''
-        run: uv run alembic -c apps/api/alembic.ini upgrade head
+        # The production credential is exposed to this step only, never to third-party actions.
+        env:
+          DDQ_DATABASE_MIGRATION_URL: ${{ secrets.DDQ_DATABASE_MIGRATION_URL }}
+        run: |
+          if [ -z "$DDQ_DATABASE_MIGRATION_URL" ]; then
+            echo "DDQ_DATABASE_MIGRATION_URL is not set: skipping migrations"
+            exit 0
+          fi
+          uv run alembic -c apps/api/alembic.ini upgrade head

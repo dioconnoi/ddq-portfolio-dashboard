@@ -4,7 +4,7 @@ import type { ReactElement } from 'react'
 import { ThemeProvider } from '../theme/ThemeProvider'
 
 export function renderWithProviders(ui: ReactElement) {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retryDelay: 0 } } })
   return render(
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>{ui}</ThemeProvider>

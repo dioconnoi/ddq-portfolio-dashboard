@@ -8,7 +8,7 @@ from limits import parse as parse_rate_limit
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
-_ORIGIN_RE = re.compile(r"^https?://[^/\s]+$")
+_ORIGIN_RE = re.compile(r"https?://[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::\d{1,5})?")
 _ASYNC_DRIVER = "postgresql+asyncpg://"
 
 
@@ -34,7 +34,9 @@ class Settings(BaseSettings):
         hide_input_in_errors=True,
     )
 
-    environment: Literal["local", "test", "production"] = "local"
+    # No default on purpose: a production host that loses this variable must fail to start
+    # rather than quietly run with local (HSTS-off, http-origin) behaviour.
+    environment: Literal["local", "test", "production"]
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     database_url: SecretStr
     database_migration_url: SecretStr | None = None
@@ -63,7 +65,7 @@ class Settings(BaseSettings):
         if not value:
             raise ValueError("at least one allowed origin is required")
         for origin in value:
-            if not _ORIGIN_RE.match(origin):
+            if not _ORIGIN_RE.fullmatch(origin):
                 raise ValueError(
                     f"invalid origin {origin!r}: use scheme://host[:port] with no path, "
                     "trailing slash or wildcard"

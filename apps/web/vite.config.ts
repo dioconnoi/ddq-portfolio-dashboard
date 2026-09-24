@@ -2,11 +2,13 @@ import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { loadEnv } from 'vite'
 import { defineConfig } from 'vitest/config'
+import { resolveApiUrl } from './src/apiUrl.ts'
 
-export default defineConfig(({ mode }) => {
-  // Fail the production build (instead of shipping a blank page) when the API URL is missing.
-  if (mode === 'production' && !loadEnv(mode, process.cwd(), 'VITE_').VITE_API_URL) {
-    throw new Error('VITE_API_URL must be set for production builds')
+export default defineConfig(({ command, mode }) => {
+  // Fail every production build (any --mode) on a missing or malformed API URL, instead of
+  // shipping a bundle that throws on load.
+  if (command === 'build') {
+    resolveApiUrl(loadEnv(mode, process.cwd(), 'VITE_').VITE_API_URL, true)
   }
   return {
     plugins: [react(), tailwindcss()],

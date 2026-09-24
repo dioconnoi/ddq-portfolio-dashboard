@@ -76,3 +76,14 @@ def test_fails_when_web_shell_is_missing() -> None:
 def test_trailing_slashes_are_tolerated() -> None:
     client = httpx.Client(transport=httpx.MockTransport(_handler()))
     assert all(r.ok for r in run_smoke(API + "/", WEB + "/", client))
+
+
+def test_network_errors_are_reported_as_a_failed_check_not_a_traceback() -> None:
+    def refuse(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused", request=request)
+
+    client = httpx.Client(transport=httpx.MockTransport(refuse))
+    results = run_smoke(API, WEB, client)
+    assert [r.ok for r in results] == [False]
+    assert results[0].name == "reachability"
+    assert "ConnectError" in results[0].detail

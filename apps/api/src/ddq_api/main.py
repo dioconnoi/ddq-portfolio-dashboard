@@ -24,11 +24,16 @@ def create_app(
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         engine = None
         if db_health is None:
-            engine = build_engine(settings.database_url.get_secret_value())
+            engine = build_engine(
+                settings.database_url.get_secret_value(),
+                require_ssl=settings.environment == "production",
+            )
             app.state.db_health = SqlAlchemyHealth(engine)
-        yield
-        if engine is not None:
-            await engine.dispose()
+        try:
+            yield
+        finally:
+            if engine is not None:
+                await engine.dispose()
 
     app = FastAPI(title="DDQ Portfolio Dashboard API", version=__version__, lifespan=lifespan)
     app.state.settings = settings

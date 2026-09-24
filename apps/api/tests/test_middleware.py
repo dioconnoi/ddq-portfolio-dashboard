@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 from starlette.requests import Request
 
-from ddq_api.core.middleware import client_ip
+from ddq_api.core.middleware import BodySizeLimitMiddleware, client_ip
 
 
 def _request(
@@ -91,3 +91,73 @@ def test_access_log_records_status_without_query_string(
     assert contexts[-1]["status"] == 200
     assert contexts[-1]["path"] == "/health"
     assert "secret" not in str(contexts)
+
+
+def _request_multi(pairs: list[tuple[str, str]]) -> Request:
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/",
+        "headers": [(k.lower().encode(), v.encode()) for k, v in pairs],
+        "client": ("10.0.0.1", 1234),
+    }
+    return Request(scope)
+
+
+def test_client_ip_joins_duplicate_forwarded_headers() -> None:
+    """Two X-Forwarded-For lines: the proxy's is the LAST entry overall, not the first line."""
+    request = _request_multi([("x-forwarded-for", "6.6.6.6"), ("x-forwarded-for", "203.0.113.9")])
+    assert client_ip(request, hops=1) == "203.0.113.9"
+
+
+def test_client_ip_rejects_entries_that_are_not_ip_addresses() -> None:
+    assert client_ip(_request({"x-forwarded-for": "not-an-ip"}), hops=1) == "10.0.0.1"
+    assert client_ip(_request({"x-forwarded-for": "x" * 5000}), hops=1) == "10.0.0.1"
+
+
+def test_client_ip_collapses_ipv6_to_its_64_prefix() -> None:
+    first = client_ip(_request({"x-forwarded-for": "2001:db8:1:2:aaaa::1"}), hops=1)
+    second = client_ip(_request({"x-forwarded-for": "2001:db8:1:2:bbbb::2"}), hops=1)
+    assert first == second == "2001:db8:1:2::/64"
+
+
+async def _body_limit_status(
+    headers: list[tuple[bytes, bytes]], method: str = "POST", scope_type: str = "http"
+) -> int:
+    started: list[int] = []
+
+    async def inner(scope: Any, receive: Any, send: Any) -> None:
+        await send({"type": "http.response.start", "status": 204, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    async def send(message: dict[str, Any]) -> None:
+        if message["type"] == "http.response.start":
+            started.append(message["status"])
+
+    async def receive() -> dict[str, Any]:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    scope = {"type": scope_type, "method": method, "headers": headers}
+    await BodySizeLimitMiddleware(inner, 1024)(scope, receive, send)
+    return started[0]
+
+
+async def test_body_limit_passes_a_small_declared_body() -> None:
+    assert await _body_limit_status([(b"content-length", b"10")]) == 204
+
+
+async def test_body_limit_rejects_content_length_combined_with_chunked() -> None:
+    headers = [(b"content-length", b"1"), (b"transfer-encoding", b"chunked")]
+    assert await _body_limit_status(headers) == 400
+
+
+async def test_body_limit_rejects_chunked_on_any_method() -> None:
+    assert await _body_limit_status([(b"transfer-encoding", b"chunked")], method="DELETE") == 411
+
+
+async def test_body_limit_rejects_non_ascii_digit_lengths_without_crashing() -> None:
+    assert await _body_limit_status([(b"content-length", "²".encode())]) == 413
+
+
+async def test_body_limit_ignores_non_http_scopes() -> None:
+    assert await _body_limit_status([], scope_type="websocket") == 204

@@ -10,7 +10,11 @@ Create the public repository from this folder (after confirming the name and own
 gh repo create ddq-portfolio-dashboard --public --source . --remote origin --push --description "DDQ (Data Driven Quant) Portfolio Risk Analytics Dashboard"
 ```
 
-Then create the `production` environment: repository Settings → Environments → New environment → `production`.
+Then harden the repository before any secret is added:
+
+1. Settings → Environments → New environment → `production`, and under **Deployment branches and tags** select **Selected branches and tags** and allow only `main`. Without this, any branch can declare `environment: production` and read the migration secret.
+2. Settings → Actions → General → Workflow permissions → **Read repository contents and packages permissions**, and **Require approval for all outside collaborators** for fork pull requests.
+3. Leave Dependabot alerts on; `.github/dependabot.yml` already schedules weekly updates for Actions, uv and npm.
 
 ## 2. Supabase
 
@@ -20,6 +24,8 @@ Then create the `production` environment: repository Settings → Environments �
    - the **transaction pooler** string (port 6543) for runtime,
    - the **session pooler** string (port 5432) for migrations.
 4. URL-encode any special characters in the password (for example `@` becomes `%40`).
+5. Project Settings → Database → **Enforce SSL on incoming connections**: on. The API also requires TLS in production.
+6. Project Settings → Data API: the SPA never calls Supabase's REST API in Phase 0, so leave it disabled (or keep every table deny-all, which the RLS guard test enforces).
 
 ## 3. Local `.env`
 

@@ -55,8 +55,8 @@ export function StatusPage({ client }: { client: ApiClient }) {
           </button>
         )}
       </div>
-      {snapshot && (
-        <dl className="grid grid-cols-3 gap-3 text-sm">
+      {snapshot && status !== 'offline' && (
+        <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-3">
           <Fact label="API version" value={snapshot.version} />
           <Fact label="Environment" value={snapshot.environment} />
           <Fact label="Database" value={snapshot.dbOk ? 'Connected' : 'Unavailable'} />

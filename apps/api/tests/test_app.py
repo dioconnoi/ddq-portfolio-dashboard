@@ -1,10 +1,15 @@
+import logging
 from typing import Any
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 
+from ddq_api.core.config import Settings
 from ddq_api.core.errors import DomainError, NotFoundError
+from ddq_api.core.handlers import _unhandled
+from ddq_api.main import create_app
 from ddq_api.routers import health as health_module
 
 
@@ -108,3 +113,68 @@ def test_unhandled_exception_is_generic_500(make_client: Any) -> None:
     assert response.json()["error"]["code"] == "internal_error"
     assert "secret internal detail" not in response.text
     assert "Traceback" not in response.text
+
+
+def test_unhandled_500_keeps_cors_security_headers_request_id_and_access_log(
+    make_client: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A browser must read the 500 envelope, and the failure must reach the access log."""
+    client = _client_with_routes(make_client)
+    with caplog.at_level(logging.INFO, logger="ddq_api.access"):
+        response = client.get("/_test/boom", headers={"Origin": "http://localhost:5173"})
+    assert response.status_code == 500
+    assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["x-request-id"]
+    statuses = [
+        getattr(r, "ctx", {}).get("status") for r in caplog.records if r.name == "ddq_api.access"
+    ]
+    assert 500 in statuses
+
+
+async def test_last_resort_handler_returns_envelope_with_request_id() -> None:
+    scope = {"type": "http", "method": "GET", "path": "/x", "headers": [], "state": {}}
+    request = Request(scope)
+    request.state.request_id = "trace-12345678"
+    response = await _unhandled(request, RuntimeError("secret"))
+    assert response.status_code == 500
+    assert response.headers["x-request-id"] == "trace-12345678"
+    assert b"secret" not in bytes(response.body)
+
+
+def test_lifespan_disposes_the_engine(settings: Settings, monkeypatch: pytest.MonkeyPatch) -> None:
+    disposed: list[bool] = []
+
+    class FakeEngine:
+        async def dispose(self) -> None:
+            disposed.append(True)
+
+    monkeypatch.setattr("ddq_api.main.build_engine", lambda url, **kwargs: FakeEngine())
+    with TestClient(create_app(settings)):
+        assert disposed == []
+    assert disposed == [True]
+
+
+def test_production_engine_requires_ssl(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[bool] = []
+
+    class FakeEngine:
+        async def dispose(self) -> None:
+            return None
+
+    def fake_build(url: str, **kwargs: Any) -> FakeEngine:
+        seen.append(kwargs["require_ssl"])
+        return FakeEngine()
+
+    monkeypatch.setattr("ddq_api.main.build_engine", fake_build)
+    production = settings.model_copy(
+        update={"environment": "production", "allowed_origins": ("https://app.example.com",)}
+    )
+    with TestClient(create_app(production)):
+        pass
+    with TestClient(create_app(settings)):
+        pass
+    assert seen == [True, False]

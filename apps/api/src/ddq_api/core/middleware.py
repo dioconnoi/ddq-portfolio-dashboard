@@ -1,5 +1,6 @@
-"""HTTP middleware: request context, security headers, body limit and rate limiting."""
+"""HTTP middleware: request context, headers, body limit, rate limiting, error catch-all."""
 
+import ipaddress
 import logging
 import math
 import re
@@ -9,35 +10,53 @@ import uuid
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from limits import parse as parse_rate_limit
-from limits.storage import MemoryStorage
-from limits.strategies import FixedWindowRateLimiter
+from limits.aio.storage import MemoryStorage
+from limits.aio.strategies import FixedWindowRateLimiter
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
-from starlette.types import ASGIApp, Receive, Scope, Send
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from ddq_api.core.config import Settings
 from ddq_api.core.envelope import fail
 from ddq_api.core.logging import request_id_var
 
 _access_log = logging.getLogger("ddq_api.access")
+_error_log = logging.getLogger("ddq_api.errors")
 _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
-_BODY_METHODS = frozenset({"POST", "PUT", "PATCH"})
+_IPV6_PREFIX = 64
+
+
+def _normalise_ip(candidate: str) -> str | None:
+    """A valid address as a rate-limit key; IPv6 collapses to its /64 (one subscriber's block)."""
+    try:
+        address = ipaddress.ip_address(candidate)
+    except ValueError:
+        return None
+    if isinstance(address, ipaddress.IPv6Address):
+        if address.ipv4_mapped is not None:
+            return str(address.ipv4_mapped)
+        return str(ipaddress.ip_network(f"{address}/{_IPV6_PREFIX}", strict=False))
+    return str(address)
 
 
 def client_ip(request: Request, hops: int) -> str:
-    """Resolve the client address.
+    """Resolve the client address used as the rate-limit key.
 
     Only the entry appended by our own trusted proxy is believed: with ``hops`` trusted
-    proxies, that is the ``hops``-th entry from the RIGHT of X-Forwarded-For. Anything to
-    its left was supplied by the client and can be forged.
+    proxies, that is the ``hops``-th entry from the RIGHT of X-Forwarded-For (all header
+    lines joined, since a client can send several). Anything to its left was supplied by the
+    client and can be forged. An entry that is not an IP address is never used as a key.
     """
     if hops > 0:
-        forwarded = request.headers.get("x-forwarded-for", "")
+        forwarded = ",".join(request.headers.getlist("x-forwarded-for"))
         entries = [part.strip() for part in forwarded.split(",") if part.strip()]
         if len(entries) >= hops:
-            return entries[-hops]
-    return request.client.host if request.client else "unknown"
+            normalised = _normalise_ip(entries[-hops])
+            if normalised is not None:
+                return normalised
+    host = request.client.host if request.client else "unknown"
+    return _normalise_ip(host) or host
 
 
 class RequestContextMiddleware(BaseHTTPMiddleware):
@@ -95,9 +114,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         key = client_ip(request, self._hops)
-        if self._limiter.hit(self._item, key):
+        if await self._limiter.hit(self._item, key):
             return await call_next(request)
-        stats = self._limiter.get_window_stats(self._item, key)
+        stats = await self._limiter.get_window_stats(self._item, key)
         retry_after = max(1, math.ceil(stats.reset_time - time.time()))
         envelope = fail("rate_limited", "Too many requests; please slow down")
         return JSONResponse(
@@ -130,20 +149,61 @@ class BodySizeLimitMiddleware:
     def _rejection(self, scope: Scope) -> JSONResponse | None:
         headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope["headers"]}
         length = headers.get("content-length")
-        if length is not None:
-            if not length.isdigit() or int(length) > self._max_bytes:
-                envelope = fail("payload_too_large", "Request body is too large")
-                return JSONResponse(status_code=413, content=envelope.model_dump(mode="json"))
-            return None
         chunked = "chunked" in headers.get("transfer-encoding", "").lower()
-        if chunked and scope["method"] in _BODY_METHODS:
-            envelope = fail("length_required", "Content-Length is required")
-            return JSONResponse(status_code=411, content=envelope.model_dump(mode="json"))
+        if length is not None and chunked:
+            # Ambiguous framing is the classic request-smuggling shape; never accept it.
+            return _error(400, "bad_request", "Conflicting Content-Length and Transfer-Encoding")
+        if length is not None:
+            if not (length.isascii() and length.isdigit()) or int(length) > self._max_bytes:
+                return _error(413, "payload_too_large", "Request body is too large")
+            return None
+        if chunked:
+            return _error(411, "length_required", "Content-Length is required")
         return None
+
+
+def _error(status: int, code: str, message: str) -> JSONResponse:
+    return JSONResponse(status_code=status, content=fail(code, message).model_dump(mode="json"))
+
+
+class UnhandledErrorMiddleware:
+    """Innermost layer: turns an unexpected exception into the 500 envelope.
+
+    Doing it here (instead of in Starlette's outermost error handler) keeps the response inside
+    the request-context, security-header and CORS layers, so browsers can read it and the
+    failure reaches the access log.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        started = False
+
+        async def tracking_send(message: Message) -> None:
+            nonlocal started
+            if message["type"] == "http.response.start":
+                started = True
+            await send(message)
+
+        try:
+            await self.app(scope, receive, tracking_send)
+        except Exception as error:
+            if started:
+                raise  # too late to change the response; let the server close the connection
+            _error_log.error(
+                "unhandled exception", exc_info=error, extra={"ctx": {"path": scope["path"]}}
+            )
+            response = _error(500, "internal_error", "An unexpected error occurred")
+            await response(scope, receive, send)
 
 
 def install_middleware(app: FastAPI, settings: Settings) -> None:
     """Add innermost first: Starlette makes the LAST added the outermost layer."""
+    app.add_middleware(UnhandledErrorMiddleware)
     app.add_middleware(BodySizeLimitMiddleware, max_bytes=settings.max_request_bytes)
     app.add_middleware(
         RateLimitMiddleware,

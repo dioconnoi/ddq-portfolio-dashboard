@@ -1,8 +1,10 @@
 import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { renderWithProviders } from '../test/utils'
 import { ThemeToggle } from './ThemeToggle'
+
+afterEach(() => vi.restoreAllMocks())
 
 describe('ThemeToggle', () => {
   it('applies the stored preference and cycles on click, persisting each choice', async () => {
@@ -21,16 +23,26 @@ describe('ThemeToggle', () => {
     expect(document.documentElement.dataset.theme).toBe('light')
   })
 
-  it('still renders and works when localStorage is unavailable', async () => {
+  it('still switches themes when localStorage is unavailable', async () => {
     vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
       throw new Error('denied')
     })
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new Error('denied')
     })
+    vi.spyOn(window, 'matchMedia').mockImplementation(
+      (query: string) =>
+        ({
+          matches: true,
+          media: query,
+          addEventListener: () => undefined,
+          removeEventListener: () => undefined,
+        }) as unknown as MediaQueryList,
+    )
     renderWithProviders(<ThemeToggle />)
-    await userEvent.click(screen.getByRole('button', { name: /theme/i }))
-    expect(document.documentElement.dataset.theme).toBeDefined()
-    vi.restoreAllMocks()
+    expect(document.documentElement.dataset.theme).toBe('dark') // system preference, dark OS
+
+    await userEvent.click(screen.getByRole('button', { name: /theme/i })) // system -> light
+    expect(document.documentElement.dataset.theme).toBe('light')
   })
 })

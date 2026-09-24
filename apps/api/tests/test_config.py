@@ -4,6 +4,7 @@ from pydantic import ValidationError
 from ddq_api.core.config import Settings, normalize_database_url
 
 BASE = {
+    "environment": "local",
     "database_url": "postgresql://user:hunter2@db.example.com:6543/postgres",
     "allowed_origins": "http://localhost:5173",
 }
@@ -16,10 +17,13 @@ def make(**overrides: object) -> Settings:
 def test_missing_database_url_fails_fast(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("DDQ_DATABASE_URL", raising=False)
     with pytest.raises(ValidationError):
-        Settings(_env_file=None, allowed_origins="http://localhost:5173")  # type: ignore[call-arg]
+        Settings(  # type: ignore[call-arg]
+            _env_file=None, environment="local", allowed_origins="http://localhost:5173"
+        )
 
 
 def test_reads_ddq_prefixed_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DDQ_ENVIRONMENT", "local")
     monkeypatch.setenv("DDQ_DATABASE_URL", "postgresql://u:p@h:6543/db")
     monkeypatch.setenv("DDQ_ALLOWED_ORIGINS", "http://localhost:5173,https://app.example.com")
     monkeypatch.setenv("DDQ_TRUSTED_PROXY_HOPS", "1")
@@ -58,7 +62,17 @@ def test_origins_are_split_and_trimmed() -> None:
 
 
 @pytest.mark.parametrize(
-    "bad", ["*", "http://a.example.com/", "http://a.example.com/path", "ftp://a.example.com", ""]
+    "bad",
+    [
+        "*",
+        "http://a.example.com/",
+        "http://a.example.com/path",
+        "ftp://a.example.com",
+        "",
+        "https://*.vercel.app",
+        "https://user@a.example.com",
+        "https://a.example.com?x=1",
+    ],
 )
 def test_rejects_wildcard_slash_path_and_empty_origins(bad: str) -> None:
     with pytest.raises(ValidationError):
@@ -92,3 +106,22 @@ def test_validation_errors_never_echo_the_password() -> None:
     with pytest.raises(ValidationError) as excinfo:
         make(database_url="mysql://user:hunter2@db.example.com/postgres")
     assert "hunter2" not in str(excinfo.value)
+
+
+def test_environment_must_be_stated_explicitly(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A production box that loses DDQ_ENVIRONMENT must fail to start, not silently run as local."""
+    monkeypatch.delenv("DDQ_ENVIRONMENT", raising=False)
+    without_environment = {k: v for k, v in BASE.items() if k != "environment"}
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, **without_environment)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("good", ["http://localhost:5173", "https://app.example.com:8443"])
+def test_accepts_well_formed_origins(good: str) -> None:
+    assert make(allowed_origins=good).allowed_origins == (good,)
+
+
+def test_origin_validator_itself_rejects_a_trailing_newline() -> None:
+    """Tuple input skips the comma splitter (which trims), so the regex must not rely on `$`."""
+    with pytest.raises(ValidationError):
+        make(allowed_origins=("http://a.example.com\n",))

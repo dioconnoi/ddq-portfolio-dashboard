@@ -66,7 +66,8 @@ The router validates and authorizes the request. The service loads holdings, and
 | Security headers | `nosniff`, frame denial, `no-store`, HSTS in production |
 | CORS | Exact-origin allowlist, no credentials |
 | Rate limit | Per-client fixed window; sits inside CORS so a 429 is readable by the browser |
-| Body size limit | Rejects oversized and unsized (chunked) bodies |
+| Body size limit | Rejects oversized bodies, chunked bodies without a length, and conflicting length headers |
+| Unhandled-error catch-all | Innermost layer: converts unexpected exceptions into the 500 envelope so they still pass through every layer above |
 
 ## Decisions
 

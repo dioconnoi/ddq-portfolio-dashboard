@@ -36,7 +36,7 @@ def make_client(settings: Settings) -> Callable[..., TestClient]:
     def _make(
         *, db_error: Exception | None = None, db_delay: float = 0.0, **overrides: Any
     ) -> TestClient:
-        effective = settings.model_copy(update=overrides) if overrides else settings
+        effective = Settings.model_validate({**settings.model_dump(), **overrides})
         app = create_app(effective, db_health=FakeDbHealth(db_error, db_delay))
         return TestClient(app, raise_server_exceptions=False)
 
