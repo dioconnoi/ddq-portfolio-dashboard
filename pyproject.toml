@@ -25,6 +25,7 @@ dev = [
   "import-linter>=2.1",
   "pip-audit>=2.7",
   "pre-commit>=4.0",
+  "httpx2>=2.13.1",
 ]
 
 [tool.ruff]
