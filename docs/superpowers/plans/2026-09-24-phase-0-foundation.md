@@ -137,7 +137,7 @@ Expected: `Count` ≥ 7 (every claim has a source URL).
 - [ ] **Step 1: Initialise git and check identity**
 
 ```powershell
-cd C:\Users\Emman\Documents\CLAUDE\ddq-portfolio-dashboard
+cd <repository root>
 git init -b main
 git config user.name
 git config user.email
@@ -2068,7 +2068,7 @@ git commit -m "feat: export deterministic OpenAPI contract with drift test"
 - [ ] **Step 1: Scaffold**
 
 ```powershell
-cd C:\Users\Emman\Documents\CLAUDE\ddq-portfolio-dashboard
+cd <repository root>
 pnpm create vite@latest apps/web --template react-ts
 ```
 If prompted (install/start now, experimental features), decline. Then:

@@ -388,5 +388,5 @@ Security review pass, load/limit testing on the free instance, accessibility pas
 ## 14. What I need from you to start Phase 0
 
 1. **Approve or amend** the ten decisions in section 2 and the phase order in section 13.
-2. **Confirm the location:** the project lives at `C:\Users\Emman\Documents\CLAUDE\ddq-portfolio-dashboard` (created, currently empty apart from this plan).
+2. **Confirm the location:** the project lives at `the repository root` (created, currently empty apart from this plan).
 3. **Accounts I'll need you to create/click through yourself** (I won't enter credentials or create accounts on your behalf): GitHub repo `ddq-portfolio-dashboard`, Supabase project, Render service, Vercel project, FRED API key, Brevo sender (Phase 7). Phase 0 will give exact steps.
