@@ -10,6 +10,7 @@ from ddq_api.core.config import Settings, get_settings
 from ddq_api.core.db import DatabaseHealth, SqlAlchemyHealth, build_engine
 from ddq_api.core.handlers import register_exception_handlers
 from ddq_api.core.logging import configure_logging
+from ddq_api.core.middleware import install_middleware
 from ddq_api.routers import health
 
 
@@ -35,5 +36,6 @@ def create_app(
         app.state.db_health = db_health
 
     register_exception_handlers(app)
+    install_middleware(app, settings)
     app.include_router(health.router)
     return app
