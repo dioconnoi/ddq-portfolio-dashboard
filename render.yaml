@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: ddq-api
+    runtime: python
+    plan: free
+    region: oregon # pick the region closest to your Supabase project, then keep them aligned
+    buildCommand: pip install uv && uv sync --frozen --no-dev --package ddq-api
+    startCommand: uv run --no-sync uvicorn ddq_api.main:create_app --factory --host 0.0.0.0 --port $PORT --no-access-log
+    healthCheckPath: /health
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
+      - key: DDQ_ENVIRONMENT
+        value: production
+      - key: DDQ_TRUSTED_PROXY_HOPS
+        value: "1"
+      - key: DDQ_DATABASE_URL
+        sync: false
+      - key: DDQ_ALLOWED_ORIGINS
+        sync: false
