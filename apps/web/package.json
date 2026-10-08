@@ -21,7 +21,7 @@
     "printWidth": 100
   },
   "dependencies": {
-    "@tanstack/react-query": "^5.103.2",
+    "@tanstack/react-query": "^5.104.1",
     "openapi-fetch": "^0.17.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
